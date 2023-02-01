@@ -1,0 +1,11 @@
+#directories
+.vs/
+.idea/
+Library/
+Logs/
+obj/
+Temp/
+
+#files
+*.sln
+*.csproj

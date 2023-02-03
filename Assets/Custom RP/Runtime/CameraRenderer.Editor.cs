@@ -7,10 +7,10 @@ using UnityEngine.Profiling;
 
 public partial class CameraRenderer
 {
-    partial void DrawGizmos();
-    partial void DrawUnsupportedShaders();
-    partial void PrepareForSceneWindow ();
-    partial void PrepareBuffer();
+    partial void DrawGizmos();//绘制gizmos gizmos就是一些辅助的类似ui的东西 场景里的摄像机、太阳标志和视锥体等
+    partial void DrawUnsupportedShaders();//绘制不支持的shader
+    partial void PrepareForSceneWindow ();//显示ui
+    partial void PrepareBuffer();//profiler和frame debugger上的布局
 
 #if UNITY_EDITOR
     static ShaderTagId[] legacyShaderTagIds = {

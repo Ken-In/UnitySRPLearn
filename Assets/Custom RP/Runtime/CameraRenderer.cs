@@ -3,91 +3,113 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 
+// pipeline 会调用这个渲染器的render函数
 public partial class CameraRenderer
 {
-    private ScriptableRenderContext context;//状态更新和绘制命令
-    private Camera camera;
-    private const string bufferName = "Render Camera";
-    private CommandBuffer buffer = new CommandBuffer{name = bufferName};//命令缓冲区 可保存渲染命令列表
+    private const string bufferName = "Render Camera";//PrepareBuffer方法会重设 bufferName
     
-    public void Render(ScriptableRenderContext context, Camera camera, bool useDynamicBatching, bool useGPUInstancing)
+    ScriptableRenderContext context;
+
+    Camera camera;
+
+    // 一些特定的渲染可以用专用方法调用（如天空盒），但其他命令需要缓冲区间接发出
+    // 创建一个新的缓冲区实例
+    private CommandBuffer buffer = new CommandBuffer
     {
+        name = bufferName // 给名字以便在 frame debugger识别
+    };
+
+    private CullingResults cullingResults;
+    
+    static ShaderTagId unlitShaderTagId = new ShaderTagId("SRPDefaultUnlit");
+    
+
+    public void Render (ScriptableRenderContext context, Camera camera,
+        bool useDynamicBatching, bool useGPUInstancing) {
         this.context = context;
         this.camera = camera;
 
-        PrepareBuffer();//profiler和frame debugger上的布局
-        PrepareForSceneWindow();//显示ui
-        if (!Cull())//剔除
+        PrepareBuffer();
+        PrepareForSceneWindow();
+        if (!Cull())
             return;
-
-        Setup();//渲染准备
+        
+        // 设置相机属性和 buffer
+        Setup();
+        
+        // 渲染命令-------------------------------------------------
+        // -------------------------------------------------------
         DrawVisibleGeometry(useDynamicBatching, useGPUInstancing);
         DrawUnsupportedShaders();
         DrawGizmos();
-        Submit();//提交
-    }
-    
-    void ExecuteBuffer()
-    {
-        context.ExecuteCommandBuffer(buffer);//注册命令到内部列表            
-        buffer.Clear();//清空buffer
+        
+        // 提交命令后 执行命令
+        Submit();
     }
 
-    void Setup()
-    {
-        context.SetupCameraProperties(camera);
-        CameraClearFlags flags = camera.clearFlags;
-        buffer.ClearRenderTarget(
-            flags <= CameraClearFlags.Depth, 
-            flags == CameraClearFlags.Color,
-            flags == CameraClearFlags.Color ?
-                camera.backgroundColor.linear : Color.clear);
-        buffer.BeginSample(SampleName);//开始记录
-        ExecuteBuffer();
-    }
-
-    static ShaderTagId unlitShaderTagId = new ShaderTagId("SRPDefaultUnlit");
-    
+    // 可视物体渲染命令
     void DrawVisibleGeometry(bool useDynamicBatching, bool useGPUInstancing)
-    {
-        var sortingSettings = new SortingSettings(camera) { criteria = SortingCriteria.CommonOpaque };//定义渲染分类
-        var drawingSettings = new DrawingSettings(unlitShaderTagId, sortingSettings) //定义绘制选择
+    {   //opaque obj render----------------------------------------
+        //---------------------------------------------------------
+        var sortingSettings = new SortingSettings(camera) // 对象排序的方法
+        {
+            criteria = SortingCriteria.CommonOpaque // 按照opaque排序 从近到远渲染
+        };
+        var drawingSettings = new DrawingSettings( // 描述如何对可见对象进行排序 使用哪些着色器通道
+            unlitShaderTagId, sortingSettings
+        )
         {
             enableDynamicBatching = useDynamicBatching,
             enableInstancing = useGPUInstancing
         };
-        GraphicsSettings.useScriptableRenderPipelineBatching = false;
-        var filteringSettings = new FilteringSettings(RenderQueueRange.opaque);//定义可见队列
+        var filteringSettings = new FilteringSettings(RenderQueueRange.opaque);// 过滤渲染对象
+        
+        // 上下文 提交绘制物体命令
         context.DrawRenderers(cullingResults, ref drawingSettings, ref filteringSettings);
         
-        context.DrawSkybox(camera);//绘制天空和
+        //sky box--------------------------------------------------
+        //---------------------------------------------------------
+        context.DrawSkybox(camera);
         
-        //transparent配置
+        //transparent obj render-----------------------------------
+        //---------------------------------------------------------
         sortingSettings.criteria = SortingCriteria.CommonTransparent;
         drawingSettings.sortingSettings = sortingSettings;
         filteringSettings.renderQueueRange = RenderQueueRange.transparent;
         
-        context.DrawRenderers(cullingResults, ref drawingSettings, ref filteringSettings);//绘制transparent物体
+        context.DrawRenderers(cullingResults, ref drawingSettings, ref filteringSettings);
     }
 
-    //context 延迟 render 直到我们 submit 它
-    void Submit()
-    {
-        buffer.EndSample(SampleName);//停止记录
-        ExecuteBuffer();
-        context.Submit();//执行命令
+    void Setup () {
+        context.SetupCameraProperties(camera);
+        CameraClearFlags flags = camera.clearFlags;
+        buffer.ClearRenderTarget(
+            flags <= CameraClearFlags.Depth, // 所有情况都需要清除depth 除了nothing
+            flags == CameraClearFlags.Color, // 相等则清除color
+            flags == CameraClearFlags.Color ? camera.backgroundColor.linear : Color.clear);// 清空RT 避免之前的渲染影响当前帧
+        buffer.BeginSample(SampleName); // buffer开始采样 之后的渲染命令都会在buffer下
+        ExecuteBuffer();// 执行清空buffer
+    }
+    
+    void Submit () {
+        buffer.EndSample(SampleName);// buffer结束采样
+        ExecuteBuffer();// 执行buffer
+        context.Submit();
+    }
+    
+    void ExecuteBuffer () {
+        context.ExecuteCommandBuffer(buffer); // 将buffer中的命令加入list 在submit中会真正执行
+        buffer.Clear();
     }
 
-    private CullingResults cullingResults;
-
-    bool Cull()
+    bool Cull () // 成功则记录 cullingResults
     {
+        // ScriptableCullingParameters 用于配置可编程渲染管线中的剔除操作的参数
         if (camera.TryGetCullingParameters(out ScriptableCullingParameters p))
         {
-            cullingResults = context.Cull(ref p);//从相机得到剔除参数
+            cullingResults = context.Cull(ref p);//剔除参数传入上下文 返回剔除结果
             return true;
         }
         return false;
     }
-
 }

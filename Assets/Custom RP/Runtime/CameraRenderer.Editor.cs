@@ -2,18 +2,28 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
-using UnityEngine.Rendering;
 using UnityEngine.Profiling;
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.VirtualTexturing;
 
+// partial class 这部分类实现editor独有的功能
 public partial class CameraRenderer
 {
-    partial void DrawGizmos();//绘制gizmos gizmos就是一些辅助的类似ui的东西 场景里的摄像机、太阳标志和视锥体等
-    partial void DrawUnsupportedShaders();//绘制不支持的shader
-    partial void PrepareForSceneWindow ();//显示ui
-    partial void PrepareBuffer();//profiler和frame debugger上的布局
+    // 因为另一部分类有调用这个类中的函数 我们还是需要声明 否则build项目时会报错
+    partial void DrawGizmos();
+    partial void DrawUnsupportedShaders();
+    
+    partial void PrepareForSceneWindow();
+    partial void PrepareBuffer();
+    
+    
+    #if UNITY_EDITOR
 
-#if UNITY_EDITOR
-    static ShaderTagId[] legacyShaderTagIds = {
+    private string SampleName { get; set; }
+    
+    // 默认的shader 标记出来 以便绘制错误色
+    private static ShaderTagId[] legacyShaderTagIds =
+    {
         new ShaderTagId("Always"),
         new ShaderTagId("ForwardBase"),
         new ShaderTagId("PrepassBase"),
@@ -21,8 +31,8 @@ public partial class CameraRenderer
         new ShaderTagId("VertexLMRGBM"),
         new ShaderTagId("VertexLM")
     };
-    static Material errorMaterial;
-    private string SampleName { get; set; }
+
+    private static Material errorMaterial;
 
     partial void DrawGizmos()
     {
@@ -39,19 +49,27 @@ public partial class CameraRenderer
         {
             errorMaterial = new Material(Shader.Find("Hidden/InternalErrorShader"));
         }
-        var drawingSettings = new DrawingSettings(legacyShaderTagIds[0], new SortingSettings(camera))
+        // 因为是渲染错误物体 不用关心设置 默认即可
+        var drawingSettings = new DrawingSettings(
+            legacyShaderTagIds[0], new SortingSettings(camera)
+        )
         {
             overrideMaterial = errorMaterial
         };
         for (int i = 1; i < legacyShaderTagIds.Length; i++) {
+            // 设置这个draw call可以渲染的pass 这里我们加入数组里所有pass
             drawingSettings.SetShaderPassName(i, legacyShaderTagIds[i]);
         }
         var filteringSettings = FilteringSettings.defaultValue;
-        context.DrawRenderers(cullingResults, ref drawingSettings, ref filteringSettings);
+        context.DrawRenderers(
+            cullingResults, ref drawingSettings, ref filteringSettings
+        );
     }
-    
-    partial void PrepareForSceneWindow () {
-        if (camera.cameraType == CameraType.SceneView) {
+
+    partial void PrepareForSceneWindow()
+    {
+        if (camera.cameraType == CameraType.SceneView)
+        {   // scene视图显示 ui
             ScriptableRenderContext.EmitWorldGeometryForSceneView(camera);
         }
     }
@@ -62,7 +80,9 @@ public partial class CameraRenderer
         buffer.name = SampleName = camera.name;
         Profiler.EndSample();
     }
-#else
-    const string SampleName => bufferName;
-#endif
+    #else
+    
+        const private string SampleName = bufferName;
+    
+    #endif
 }
